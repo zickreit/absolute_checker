@@ -16,12 +16,10 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.5"
+local CURRENT_VERSION = "0.5.3"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
-    { version = "0.5.4", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с разрешением игры\n Теперь отображаются события выпуска из читмира" }, 
-    { version = "0.5.4", changes = "- Изменена начальную прозрачность окна: с 50 на 80"},
     { version = "0.5.3", changes = "- Версия для проверки работы автообновления скрипта"},
     { version = "0.5.2", changes = "- Автообновление без внешних файлов\n- Исправлена ошибка с TreeNode\n- Улучшена стабильность" },
     { version = "0.5.1", changes = "- Первая версия с автообновлением\n- База админов обновляется автоматически" }
@@ -50,7 +48,7 @@ local default_settings = {
     window_width = 250,
     window_pos_x = 1780,
     window_pos_y = 530,
-    window_alpha = 0.8,
+    window_alpha = 0.5,
     colored_nicks = true,
     afk_check_interval = 1,
     afk_dialog_delay = 10,
