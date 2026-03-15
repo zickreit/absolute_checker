@@ -1,4 +1,4 @@
--- absolute_checker.lua – финальная версия с исправленной системой автообновления
+-- absolute_checker.lua – 0.5.2
 
 local copas = require('copas')
 local http = require('copas.http')
@@ -22,11 +22,11 @@ local CURRENT_VERSION = "0.5.2"
 local DATA_FOLDER = getWorkingDirectory() .. "\\config\\admin_data\\"
 local SERVER_IPS = "185.71.66.21"
 local SERVERS = {
-    Platinum = { port = 7771, url = "http://sa-mp.ru/adminhistory-platinum" },
-    Titanium = { port = 7772, url = "http://sa-mp.ru/adminhistory-titanium" },
-    Chromium = { port = 7773, url = "http://sa-mp.ru/adminhistory-chromium" },
-    Aurum    = { port = 7774, url = "http://sa-mp.ru/adminhistory-aurum" },
-    Lithium  = { port = 7775, url = "http://sa-mp.ru/adminhistory-litium" },
+    Platinum = { port = 7771, url = "https://sa-mp.ru/adminhistory-platinum" },
+    Titanium = { port = 7772, url = "https://sa-mp.ru/adminhistory-titanium" },
+    Chromium = { port = 7773, url = "https://sa-mp.ru/adminhistory-chromium" },
+    Aurum    = { port = 7774, url = "https://sa-mp.ru/adminhistory-aurum" },
+    Lithium  = { port = 7775, url = "https://sa-mp.ru/adminhistory-litium" },
     Test     = { port = 7111, url = nil}
 }
 
@@ -51,7 +51,7 @@ local default_settings = {
     view_mode = 1,                  -- 1 все, 2 не AFK, 3 активные, 4 активные не AFK
     -- Автообновление
     enable_auto_update = true,
-    github_repo = "zickreit/absolute_checker/blob",  -- например "username/repo"
+    github_repo = "",                -- например "username/repo"
     github_branch = "main",
     github_token = "",               -- опционально, для приватных репозиториев
     last_update_check = 0,
@@ -517,7 +517,7 @@ function eshoRaz(id)
     sampSendClickPlayer(id, 0)
 end
 
--- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (ИСПРАВЛЕНО) ==========
+-- ========== СИСТЕМА АВТООБНОВЛЕНИЯ ==========
 
 local function get_github_raw_url(file)
     if settings.github_repo == "" then return nil end
@@ -538,10 +538,10 @@ local function github_request(url, callback)
             sink = ltn12.sink.table(response_body)
         })
         if not success then
-            callback(nil, 0, tostring(ok))  -- ok содержит сообщение об ошибке pcall
+            callback(nil, 0, tostring(ok))
             return
         end
-        if not ok then  -- ok = false/nil означает ошибку выполнения запроса (например, нет интернета)
+        if not ok then
             callback(nil, response_code or 0, table.concat(response_body))
             return
         end
@@ -554,6 +554,9 @@ local function github_request(url, callback)
     end)
 end
 
+-- Переменная для хранения информации о доступном обновлении
+local update_info = nil
+
 function check_for_updates(manual)
     if not settings.enable_auto_update and not manual then return end
     local version_url = get_github_raw_url("version.txt")
@@ -564,7 +567,7 @@ function check_for_updates(manual)
     sampAddChatMessage("[AdminChecker] Проверяю обновления...", 0xAAAAAA)
     github_request(version_url, function(content, code, err)
         if code == 200 and content then
-            local remote_version = content:match("^%s*(%S+)%s*$")  -- берём первую строку без пробелов
+            local remote_version = content:match("^%s*(%S+)%s*$")
             if remote_version and remote_version ~= CURRENT_VERSION then
                 sampAddChatMessage(string.format("[AdminChecker] Доступна новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
                 sampAddChatMessage("[AdminChecker] Загрузить обновление? (/updateconfirm)", 0xFFFF00)
@@ -581,32 +584,43 @@ function check_for_updates(manual)
     end)
 end
 
-local update_info = nil
-
 function download_update()
     if not update_info then
-        sampAddChatMessage("[AdminChecker] Нет информации об обновлении.", 0xFF0000)
+        sampAddChatMessage("[AdminChecker] Нет информации об обновлении. Сначала выполните /checkupdate.", 0xFF0000)
         return
     end
     local url = update_info.url
     if not url then return end
+    sampAddChatMessage("[AdminChecker] Загружаю обновление...", 0xAAAAAA)
     github_request(url, function(content, code, err)
         if code == 200 and content then
-            -- сохраняем во временный файл
+            -- content от GitHub в UTF-8, преобразуем в CP1251 для сохранения
+            local ok, converted = pcall(function()
+                return u8:decode(content)  -- u8 = encoding.UTF8, decode вернёт CP1251
+            end)
+            if not ok or not converted then
+                sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки: " .. tostring(converted), 0xFF0000)
+                return
+            end
             local temp_file = DATA_FOLDER .. "update_temp.lua"
             local f = io.open(temp_file, "w")
             if f then
-                f:write(content)
+                f:write(converted)
                 f:close()
-                -- заменяем текущий скрипт
                 local current_script = thisScript().path
-                local success, err = os.rename(temp_file, current_script)
+                -- Удаляем текущий скрипт
+                local removed, err_rem = os.remove(current_script)
+                if not removed then
+                    sampAddChatMessage("[AdminChecker] Не удалось удалить текущий скрипт: " .. tostring(err_rem), 0xFF0000)
+                    return
+                end
+                local success, err_ren = os.rename(temp_file, current_script)
                 if success then
                     sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
                     wait(1000)
                     thisScript():reload()
                 else
-                    sampAddChatMessage("[AdminChecker] Ошибка замены файла: " .. tostring(err), 0xFF0000)
+                    sampAddChatMessage("[AdminChecker] Ошибка переименования файла: " .. tostring(err_ren), 0xFF0000)
                 end
             else
                 sampAddChatMessage("[AdminChecker] Не удалось создать временный файл.", 0xFF0000)
