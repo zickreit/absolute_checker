@@ -51,7 +51,7 @@ local default_settings = {
     view_mode = 1,                  -- 1 все, 2 не AFK, 3 активные, 4 активные не AFK
     -- Автообновление
     enable_auto_update = true,
-    github_repo = "",                -- например "username/repo"
+    github_repo = "zickreit/absolute_checker/blob",  -- например "username/repo"
     github_branch = "main",
     github_token = "",               -- опционально, для приватных репозиториев
     last_update_check = 0,
