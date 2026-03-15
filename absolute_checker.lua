@@ -1,4 +1,4 @@
--- absolute_checker.lua – 0.5.2
+-- absolute_checker.lua – финальная версия с автоматическим обновлением и списком изменений
 
 local copas = require('copas')
 local http = require('copas.http')
@@ -16,7 +16,7 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.2"
+local CURRENT_VERSION = "0.5.3"
 
 -- Настройки
 local DATA_FOLDER = getWorkingDirectory() .. "\\config\\admin_data\\"
@@ -29,6 +29,10 @@ local SERVERS = {
     Lithium  = { port = 7775, url = "https://sa-mp.ru/adminhistory-litium" },
     Test     = { port = 7111, url = nil}
 }
+
+-- Фиксированные параметры репозитория
+local GITHUB_REPO = "zickreit/absolute_checker"
+local GITHUB_BRANCH = "main"
 
 local default_settings = {
     font_size_main = 14,
@@ -49,13 +53,6 @@ local default_settings = {
     enable_chat_alerts = true,
     last_admin_update_time = os.time(),
     view_mode = 1,                  -- 1 все, 2 не AFK, 3 активные, 4 активные не AFK
-    -- Автообновление
-    enable_auto_update = true,
-    github_repo = "",                -- например "username/repo"
-    github_branch = "main",
-    github_token = "",               -- опционально, для приватных репозиториев
-    last_update_check = 0,
-    auto_update_interval = 86400,    -- раз в сутки (сек)
 }
 
 local settings = {}
@@ -140,6 +137,9 @@ local view_mode_icon_color = { [1]=imgui.ImVec4(1,1,1,1), [2]=imgui.ImVec4(0,1,0
 -- Таймеры
 local last_afk_check = os.time()
 local last_chat_check_time = os.time()
+
+-- Данные для окна обновлений
+local changelog_data = {}          -- массив { version, changes }
 
 -- Нормализация ника
 local function normalizeNick(nick)
@@ -517,24 +517,18 @@ function eshoRaz(id)
     sampSendClickPlayer(id, 0)
 end
 
--- ========== СИСТЕМА АВТООБНОВЛЕНИЯ ==========
+-- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (новая, без настроек) ==========
 
 local function get_github_raw_url(file)
-    if settings.github_repo == "" then return nil end
-    local base = "https://raw.githubusercontent.com/" .. settings.github_repo .. "/" .. settings.github_branch .. "/"
+    local base = "https://raw.githubusercontent.com/" .. GITHUB_REPO .. "/" .. GITHUB_BRANCH .. "/"
     return base .. file
 end
 
 local function github_request(url, callback)
     copas.addthread(function()
-        local headers = {}
-        if settings.github_token ~= "" then
-            headers["Authorization"] = "token " .. settings.github_token
-        end
         local response_body = {}
         local success, ok, response_code = pcall(http.request, {
             url = url,
-            headers = headers,
             sink = ltn12.sink.table(response_body)
         })
         if not success then
@@ -554,30 +548,52 @@ local function github_request(url, callback)
     end)
 end
 
--- Переменная для хранения информации о доступном обновлении
-local update_info = nil
-
-function check_for_updates(manual)
-    if not settings.enable_auto_update and not manual then return end
-    local version_url = get_github_raw_url("version.txt")
-    if not version_url then
-        if manual then sampAddChatMessage("[AdminChecker] Репозиторий не указан в настройках.", 0xFF0000) end
+-- Загружает changelog.json и обновляет changelog_data
+local function fetch_changelog(callback)
+    local url = get_github_raw_url("changelog.json")
+    if not url then
+        if callback then callback(false) end
         return
     end
-    sampAddChatMessage("[AdminChecker] Проверяю обновления...", 0xAAAAAA)
+    github_request(url, function(content, code)
+        if code == 200 and content then
+            local ok, data = pcall(json.decode, content)
+            if ok and type(data) == "table" then
+                changelog_data = data
+                if callback then callback(true) end
+                return
+            end
+        end
+        changelog_data = {}
+        if callback then callback(false) end
+    end)
+end
+
+-- Проверяет версию и при необходимости загружает обновление
+function check_for_updates(manual)
+    local version_url = get_github_raw_url("version.txt")
+    if not version_url then
+        if manual then sampAddChatMessage("[AdminChecker] Ошибка: не удалось сформировать URL.", 0xFF0000) end
+        return
+    end
+    if manual then sampAddChatMessage("[AdminChecker] Проверяю обновления...", 0xAAAAAA) end
     github_request(version_url, function(content, code, err)
         if code == 200 and content then
             local remote_version = content:match("^%s*(%S+)%s*$")
             if remote_version and remote_version ~= CURRENT_VERSION then
-                sampAddChatMessage(string.format("[AdminChecker] Доступна новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
-                sampAddChatMessage("[AdminChecker] Загрузить обновление? (/updateconfirm)", 0xFFFF00)
-                update_info = { version = remote_version, url = get_github_raw_url("absolute_checker.lua") }
+                sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
+                -- Загружаем changelog для отображения в настройках
+                fetch_changelog()
+                -- Автоматически загружаем обновление
+                download_update()
             else
                 if manual then sampAddChatMessage("[AdminChecker] У вас актуальная версия.", 0x00FF00) end
+                -- Даже если версия не новая, обновим changelog
+                fetch_changelog()
             end
         else
             if manual then
-                sampAddChatMessage(string.format("[AdminChecker] Не удалось проверить обновления. Код: %s, URL: %s", tostring(code), version_url), 0xFF0000)
+                sampAddChatMessage(string.format("[AdminChecker] Не удалось проверить обновления. Код: %s", tostring(code)), 0xFF0000)
                 if err and err ~= "" then sampAddChatMessage("Ошибка: " .. err, 0xFF0000) end
             end
         end
@@ -585,21 +601,17 @@ function check_for_updates(manual)
 end
 
 function download_update()
-    if not update_info then
-        sampAddChatMessage("[AdminChecker] Нет информации об обновлении. Сначала выполните /checkupdate.", 0xFF0000)
-        return
-    end
-    local url = update_info.url
+    local url = get_github_raw_url("absolute_checker.lua")
     if not url then return end
     sampAddChatMessage("[AdminChecker] Загружаю обновление...", 0xAAAAAA)
     github_request(url, function(content, code, err)
         if code == 200 and content then
-            -- content от GitHub в UTF-8, преобразуем в CP1251 для сохранения
+            -- Конвертируем из UTF-8 в CP1251
             local ok, converted = pcall(function()
-                return u8:decode(content)  -- u8 = encoding.UTF8, decode вернёт CP1251
+                return u8:decode(content)
             end)
             if not ok or not converted then
-                sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки: " .. tostring(converted), 0xFF0000)
+                sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки.", 0xFF0000)
                 return
             end
             local temp_file = DATA_FOLDER .. "update_temp.lua"
@@ -634,10 +646,6 @@ end
 -- Регистрация команд
 sampRegisterChatCommand("checkupdate", function()
     check_for_updates(true)
-end)
-
-sampRegisterChatCommand("updateconfirm", function()
-    download_update()
 end)
 
 -- =============================================
@@ -675,14 +683,10 @@ function main()
     sampRegisterChatCommand("updadmins", function() update_all_bases() end)
     sampRegisterChatCommand("reloadscript", function() thisScript():reload() end)
 
-    -- Проверка обновлений при запуске (если включено)
-    if settings.enable_auto_update then
-        if os.time() - settings.last_update_check >= settings.auto_update_interval then
-            settings.last_update_check = os.time()
-            save_settings()
-            lua_thread.create(function() check_for_updates(false) end)
-        end
-    end
+    -- Автоматическая проверка обновлений при старте
+    lua_thread.create(function()
+        check_for_updates(false)
+    end)
 
     while true do
         copas.step(0)
@@ -730,7 +734,6 @@ function main()
                     local name = sampGetPlayerNickname(i)
                     local normalized = normalizeNick(name)
                     local afk = afk_status[i]
-                    local now = os.time()
                     local include = false
                     if settings.view_mode == 1 then include = true
                     elseif settings.view_mode == 2 then include = (not afk or not afk.afk)
@@ -1138,36 +1141,25 @@ imgui.OnFrame(function() return show_settings[0] end, function()
             end
         end
 
-        if imgui.CollapsingHeader(u8("Автообновление")) then
-            local val_auto_update = imgui.new.bool(settings.enable_auto_update)
-            if imgui.Checkbox(u8("Включить автообновление"), val_auto_update) then
-                settings.enable_auto_update = val_auto_update[0]
-                changed = true
-            end
-            local val_repo = imgui.new.char[256](settings.github_repo)
-            if imgui.InputText(u8("Репозиторий (user/repo)"), val_repo, 256) then
-                settings.github_repo = ffi.string(val_repo)
-                changed = true
-            end
-            local val_branch = imgui.new.char[256](settings.github_branch)
-            if imgui.InputText(u8("Ветка"), val_branch, 256) then
-                settings.github_branch = ffi.string(val_branch)
-                changed = true
-            end
-            local val_token = imgui.new.char[512](settings.github_token)
-            if imgui.InputText(u8("Токен (опционально)"), val_token, 512) then
-                settings.github_token = ffi.string(val_token)
-                changed = true
-            end
-            local val_interval = imgui.new.int(settings.auto_update_interval / 3600)
-            if imgui.SliderInt(u8("Проверять раз в (часов)"), val_interval, 1, 168) then
-                settings.auto_update_interval = val_interval[0] * 3600
-                changed = true
-            end
+        if imgui.CollapsingHeader(u8("Обновления")) then
             imgui.Text(u8("Текущая версия: ") .. CURRENT_VERSION)
             if imgui.Button(u8("Проверить обновления сейчас")) then
                 lua_thread.create(function() check_for_updates(true) end)
             end
+            imgui.Separator()
+            imgui.Text(u8("История изменений:"))
+            imgui.BeginChild("##changelog", imgui.ImVec2(0, 150))
+            if #changelog_data == 0 then
+                imgui.TextDisabled(u8("Нет данных"))
+            else
+                for _, entry in ipairs(changelog_data) do
+                    if imgui.TreeNode(u8(entry.version)) then
+                        imgui.TextWrapped(u8(entry.changes or ""))
+                        imgui.TreePop()
+                    end
+                end
+            end
+            imgui.EndChild()
         end
 
         if changed then
@@ -1200,44 +1192,30 @@ function imgui.TextQuestion(text)
 end
 
 function ShowTooltip(text)
-    -- Позиция мыши (объект ImVec2)
     local mouse_pos = imgui.GetMousePos()
     local mouse_x = mouse_pos.x
     local mouse_y = mouse_pos.y
-
-    -- Размер текста (тоже ImVec2)
     local text_size = imgui.CalcTextSize(text)
     local text_w = text_size.x
     local text_h = text_size.y
-
-    -- Размер экрана (окна игры)
     local io = imgui.GetIO()
     local display_w = io.DisplaySize.x
     local display_h = io.DisplaySize.y
 
-    -- Базовая позиция (справа снизу от курсора)
     local tooltip_x = mouse_x
     local tooltip_y = mouse_y - 40
 
-    -- Коррекция по X
     if tooltip_x + (text_w + 20) > display_w then
         tooltip_x = mouse_x - text_w
     end
-
-    -- Коррекция по Y
     if tooltip_y + text_h > display_h then
         tooltip_y = mouse_y - (text_h + 40)
     end
-
-    -- Защита от выхода за левую/верхнюю границу
     if tooltip_x < 0 then tooltip_x = 0 end
     if tooltip_y < 0 then tooltip_y = 0 end
 
-    -- Создаём ImVec2 из координат и передаём в SetNextWindowPos
     local pos = imgui.ImVec2(tooltip_x, tooltip_y)
     imgui.SetNextWindowPos(pos)
-
-    -- Отображаем тултип
     imgui.BeginTooltip()
     imgui.Text(text)
     imgui.EndTooltip()
