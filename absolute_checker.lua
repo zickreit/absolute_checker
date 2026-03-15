@@ -16,10 +16,12 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.3"
+local CURRENT_VERSION = "0.5.5"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
+    { version = "0.5.5", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
+    { version = "0.5.4", changes = "- Изменена начальную прозрачность окна: с 50 на 80"},
     { version = "0.5.3", changes = "- Версия для проверки работы автообновления скрипта"},
     { version = "0.5.2", changes = "- Автообновление без внешних файлов\n- Исправлена ошибка с TreeNode\n- Улучшена стабильность" },
     { version = "0.5.1", changes = "- Первая версия с автообновлением\n- База админов обновляется автоматически" }
@@ -46,9 +48,9 @@ local default_settings = {
     font_size_icon = 14,
     font_size_title = 14,
     window_width = 250,
-    window_pos_x = 1780,
-    window_pos_y = 530,
-    window_alpha = 0.5,
+    window_pos_x = 0.8,
+    window_pos_y = 0.5,
+    window_alpha = 0.8,
     colored_nicks = true,
     afk_check_interval = 1,
     afk_dialog_delay = 10,
@@ -341,7 +343,7 @@ local function check_new_chat_alerts(server_key)
                         end
                         for _, act in ipairs(new_actions) do
                             local low_act = u8:decode(act.action:lower())
-                            if low_act:find("читмир") or low_act:find("читерский мир") or low_act:find("читерского мира") then
+                            if low_act:find("читмир") or low_act:find("читерский мир") or low_act:find("Читерский мир") or low_act:find("читерского мира") or low_act:find("Читерского мира") then
                                 sampAddChatMessage(u8:decode(act.date) .. ': ' .. u8:decode(act.action), 0xFFA500)
                             end
                         end
@@ -594,6 +596,8 @@ function check_for_updates(manual)
                     local success, err_ren = os.rename(temp_file, current_script)
                     if success then
                         sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
+                        settings = {}
+                        save_settings()
                         wait(1000)
                         thisScript():reload()
                     else
@@ -653,10 +657,15 @@ function main()
 
     sampRegisterChatCommand("updadmins", function() update_all_bases() end)
     sampRegisterChatCommand("reloadscript", function() thisScript():reload() end)
+    sampRegisterChatCommand("admsettings", function()
+        lua_thread.create(function()
+            show_settings[0] = not show_settings[0]
+        end)
+    end)
 
     -- Автоматическая проверка обновлений при старте
     lua_thread.create(function()
-        check_for_updates(false)
+        check_for_updates(true)
     end)
 
     while true do
@@ -807,8 +816,12 @@ local cogColor = imgui.ImVec4(1,1,1,1)
 -- Основное окно
 imgui.OnFrame(function() return show_window[0] end, function(this)
     this.HideCursor = true
-
-    imgui.SetNextWindowPos(imgui.ImVec2(settings.window_pos_x, settings.window_pos_y), imgui.Cond.Always, imgui.ImVec2(0.5, 0))
+    local sw, sh = getScreenResolution()
+    local pos_x =  sw * settings.window_pos_x
+    local pos_y = sh * settings.window_pos_y
+    if pos_x + (settings.window_width * 0.5) > sw then pos_x = sw - (settings.window_width * 0.5) end
+    if pos_x - (settings.window_width * 0.5) < 0 then pos_x = (settings.window_width * 0.5) end
+    imgui.SetNextWindowPos(imgui.ImVec2(pos_x, pos_y), imgui.Cond.Always, imgui.ImVec2(0.5, 0))
     imgui.SetNextWindowSize(imgui.ImVec2(settings.window_width, 0), imgui.Cond.Always)
     imgui.SetNextWindowBgAlpha(settings.window_alpha)
     local flags = imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.AlwaysAutoResize
@@ -1037,14 +1050,14 @@ imgui.OnFrame(function() return show_settings[0] end, function()
                 changed = true
             end
 
-            local val_pos_x = imgui.new.int(settings.window_pos_x)
-            if imgui.SliderInt(u8("Позиция X"), val_pos_x, 0, 1920) then
+            local val_pos_x = imgui.new.float(settings.window_pos_x)
+            if imgui.SliderFloat(u8("Позиция X"), val_pos_x, 0, 1) then
                 settings.window_pos_x = val_pos_x[0]
                 changed = true
             end
 
-            local val_pos_y = imgui.new.int(settings.window_pos_y)
-            if imgui.SliderInt(u8("Позиция Y"), val_pos_y, 0, 1080) then
+            local val_pos_y = imgui.new.float(settings.window_pos_y)
+            if imgui.SliderFloat(u8("Позиция Y"), val_pos_y, 0, 1) then
                 settings.window_pos_y = val_pos_y[0]
                 changed = true
             end
