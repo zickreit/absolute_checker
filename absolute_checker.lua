@@ -16,10 +16,11 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.5"
+local CURRENT_VERSION = "0.5.6"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
+    { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
     { version = "0.5.5", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
     { version = "0.5.4", changes = "- Изменена начальную прозрачность окна: с 50 на 80"},
     { version = "0.5.3", changes = "- Версия для проверки работы автообновления скрипта"},
@@ -48,7 +49,7 @@ local default_settings = {
     font_size_icon = 14,
     font_size_title = 14,
     window_width = 250,
-    window_pos_x = 0.8,
+    window_pos_x = 0.915,
     window_pos_y = 0.5,
     window_alpha = 0.8,
     colored_nicks = true,
