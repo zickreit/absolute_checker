@@ -1,4 +1,4 @@
--- absolute_checker.lua – финальная версия с системой автообновления через GitHub
+-- absolute_checker.lua – финальная версия с исправленной системой автообновления
 
 local copas = require('copas')
 local http = require('copas.http')
@@ -16,7 +16,7 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.1"
+local CURRENT_VERSION = "0.5.2"
 
 -- Настройки
 local DATA_FOLDER = getWorkingDirectory() .. "\\config\\admin_data\\"
@@ -51,9 +51,9 @@ local default_settings = {
     view_mode = 1,                  -- 1 все, 2 не AFK, 3 активные, 4 активные не AFK
     -- Автообновление
     enable_auto_update = true,
-    github_repo = "zickreit/absolute_checker/refs/heads",                -- например "username/repo"
+    github_repo = "",                -- например "username/repo"
     github_branch = "main",
-    github_token = "",         -- опционально, для приватных репозиториев
+    github_token = "",               -- опционально, для приватных репозиториев
     last_update_check = 0,
     auto_update_interval = 86400,    -- раз в сутки (сек)
 }
@@ -517,7 +517,7 @@ function eshoRaz(id)
     sampSendClickPlayer(id, 0)
 end
 
--- ========== СИСТЕМА АВТООБНОВЛЕНИЯ ==========
+-- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (ИСПРАВЛЕНО) ==========
 
 local function get_github_raw_url(file)
     if settings.github_repo == "" then return nil end
@@ -532,55 +532,25 @@ local function github_request(url, callback)
             headers["Authorization"] = "token " .. settings.github_token
         end
         local response_body = {}
-        local success, res, code = pcall(http.request, {
+        local success, ok, response_code = pcall(http.request, {
             url = url,
             headers = headers,
             sink = ltn12.sink.table(response_body)
         })
         if not success then
-            callback(nil, 0)
+            callback(nil, 0, tostring(ok))  -- ok содержит сообщение об ошибке pcall
+            return
+        end
+        if not ok then  -- ok = false/nil означает ошибку выполнения запроса (например, нет интернета)
+            callback(nil, response_code or 0, table.concat(response_body))
             return
         end
         local content = table.concat(response_body)
-        if code ~= 200 then
-            callback(nil, code)
+        if response_code ~= 200 then
+            callback(nil, response_code, content)
             return
         end
-        callback(content, code)
-    end)
-end
-
-local function github_request(url, callback)
-    copas.addthread(function()
-        local headers = {}
-        if settings.github_token ~= "" then
-            headers["Authorization"] = "token " .. settings.github_token
-        end
-        local response_body = {}
-        local success, res, code = pcall(http.request, {
-            url = url,
-            headers = headers,
-            sink = ltn12.sink.table(response_body)
-        })
-        if not success then
-            -- ошибка при выполнении запроса (например, нет интернета)
-            callback(nil, 0, tostring(res))
-            return
-        end
-        local content = table.concat(response_body)
-        -- В res может лежать код ответа, но иногда это таблица; лучше проверить
-        if type(res) == "number" then
-            code = res
-        elseif type(res) == "table" and res.code then
-            code = res.code
-        else
-            code = code or 0
-        end
-        if code ~= 200 then
-            callback(nil, code, content)
-            return
-        end
-        callback(content, code)
+        callback(content, response_code)
     end)
 end
 
@@ -594,7 +564,7 @@ function check_for_updates(manual)
     sampAddChatMessage("[AdminChecker] Проверяю обновления...", 0xAAAAAA)
     github_request(version_url, function(content, code, err)
         if code == 200 and content then
-            local remote_version = content:match("%S+")
+            local remote_version = content:match("^%s*(%S+)%s*$")  -- берём первую строку без пробелов
             if remote_version and remote_version ~= CURRENT_VERSION then
                 sampAddChatMessage(string.format("[AdminChecker] Доступна новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
                 sampAddChatMessage("[AdminChecker] Загрузить обновление? (/updateconfirm)", 0xFFFF00)
@@ -620,7 +590,7 @@ function download_update()
     end
     local url = update_info.url
     if not url then return end
-    github_request(url, function(content, code)
+    github_request(url, function(content, code, err)
         if code == 200 and content then
             -- сохраняем во временный файл
             local temp_file = DATA_FOLDER .. "update_temp.lua"
