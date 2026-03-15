@@ -16,10 +16,11 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.2"
+local CURRENT_VERSION = "0.5.3"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
+    { version = "0.5.3", changes = "- Версия для проверки работы автообновления скрипта"}
     { version = "0.5.2", changes = "- Автообновление без внешних файлов\n- Исправлена ошибка с TreeNode\n- Улучшена стабильность" },
     { version = "0.5.1", changes = "- Первая версия с автообновлением\n- База админов обновляется автоматически" }
 }
