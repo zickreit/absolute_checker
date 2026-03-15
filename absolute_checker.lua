@@ -1,4 +1,4 @@
--- absolute_checker.lua – финальная версия с автообновлением без version.txt
+-- absolute_checker.lua – финальная версия с автообновлением и встроенным changelog
 
 local copas = require('copas')
 local http = require('copas.http')
@@ -17,6 +17,12 @@ local u8 = encoding.UTF8
 
 -- Версия скрипта
 local CURRENT_VERSION = "0.5.2"
+
+-- Встроенный список изменений (changelog)
+local CHANGELOG = {
+    { version = "0.5.2", changes = "- Автообновление без внешних файлов\n- Исправлена ошибка с TreeNode\n- Улучшена стабильность" },
+    { version = "0.5.1", changes = "- Первая версия с автообновлением\n- База админов обновляется автоматически" }
+}
 
 -- Настройки
 local DATA_FOLDER = getWorkingDirectory() .. "\\config\\admin_data\\"
@@ -137,9 +143,6 @@ local view_mode_icon_color = { [1]=imgui.ImVec4(1,1,1,1), [2]=imgui.ImVec4(0,1,0
 -- Таймеры
 local last_afk_check = os.time()
 local last_chat_check_time = os.time()
-
--- Данные для окна обновлений
-local changelog_data = {}          -- массив { version, changes }
 
 -- Нормализация ника
 local function normalizeNick(nick)
@@ -517,7 +520,7 @@ function eshoRaz(id)
     sampSendClickPlayer(id, 0)
 end
 
--- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (без version.txt) ==========
+-- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (без внешних файлов) ==========
 
 local function get_github_raw_url(file)
     local base = "https://raw.githubusercontent.com/" .. GITHUB_REPO .. "/" .. GITHUB_BRANCH .. "/"
@@ -554,27 +557,6 @@ local function extract_version_from_script(content)
     return content:match(version_pattern)
 end
 
--- Загружает changelog.json (опционально)
-local function fetch_changelog(callback)
-    local url = get_github_raw_url("changelog.json")
-    if not url then
-        if callback then callback(false) end
-        return
-    end
-    github_request(url, function(content, code)
-        if code == 200 and content then
-            local ok, data = pcall(json.decode, content)
-            if ok and type(data) == "table" then
-                changelog_data = data
-                if callback then callback(true) end
-                return
-            end
-        end
-        changelog_data = {}
-        if callback then callback(false) end
-    end)
-end
-
 -- Проверяет версию и при необходимости обновляется
 function check_for_updates(manual)
     local script_url = get_github_raw_url("absolute_checker.lua")
@@ -588,8 +570,6 @@ function check_for_updates(manual)
             local remote_version = extract_version_from_script(content)
             if remote_version and remote_version ~= CURRENT_VERSION then
                 sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
-                -- Загружаем changelog для отображения
-                fetch_changelog()
                 -- Конвертируем в CP1251 и сохраняем
                 local ok, converted = pcall(function()
                     return u8:decode(content)
@@ -623,8 +603,6 @@ function check_for_updates(manual)
                 end
             else
                 if manual then sampAddChatMessage("[AdminChecker] У вас актуальная версия.", 0x00FF00) end
-                -- Обновляем changelog даже если версия не новая
-                fetch_changelog()
             end
         else
             if manual then
@@ -996,7 +974,6 @@ imgui.OnFrame(function() return show_history[0] end, function()
         else
             -- Автоматическая загрузка при первом открытии или смене ника
             if current_server_key and selected_admin.nick ~= "" and (not selected_admin.last_loaded_nick or selected_admin.last_loaded_nick ~= selected_admin.nick) then
-                -- Запускаем загрузку в следующем кадре, чтобы не блокировать
                 lua_thread.create(function()
                     selected_admin.loading = true
                     selected_admin.actions = {}
@@ -1141,13 +1118,12 @@ imgui.OnFrame(function() return show_settings[0] end, function()
             imgui.Separator()
             imgui.Text(u8("История изменений:"))
             imgui.BeginChild("##changelog", imgui.ImVec2(0, 150))
-            if #changelog_data == 0 then
+            if #CHANGELOG == 0 then
                 imgui.TextDisabled(u8("Нет данных"))
             else
-                for _, entry in ipairs(changelog_data) do
-                    if imgui.TreeNode(u8(entry.version)) then
+                for _, entry in ipairs(CHANGELOG) do
+                    if imgui.CollapsingHeader(u8(entry.version)) then
                         imgui.TextWrapped(u8(entry.changes or ""))
-                        imgui.TreePop()
                     end
                 end
             end
