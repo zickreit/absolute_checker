@@ -16,10 +16,11 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.6"
+local CURRENT_VERSION = "0.5.7"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
+    { version = "0.5.7", changes = "- Фикс проблемы с сбросом конфига при обновлении"},
     { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
     { version = "0.5.5", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
     { version = "0.5.4", changes = "- Изменена начальную прозрачность окна: с 50 на 80"},
@@ -597,7 +598,7 @@ function check_for_updates(manual)
                     local success, err_ren = os.rename(temp_file, current_script)
                     if success then
                         sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
-                        settings = {}
+                        settings = default_settings
                         save_settings()
                         wait(1000)
                         thisScript():reload()
