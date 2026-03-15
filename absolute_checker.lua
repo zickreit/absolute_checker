@@ -1,4 +1,4 @@
--- absolute_checker.lua – финальная версия с автоматическим обновлением и списком изменений
+-- absolute_checker.lua – финальная версия с автообновлением без version.txt
 
 local copas = require('copas')
 local http = require('copas.http')
@@ -16,7 +16,7 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.3"
+local CURRENT_VERSION = "0.5.2"
 
 -- Настройки
 local DATA_FOLDER = getWorkingDirectory() .. "\\config\\admin_data\\"
@@ -517,7 +517,7 @@ function eshoRaz(id)
     sampSendClickPlayer(id, 0)
 end
 
--- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (новая, без настроек) ==========
+-- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (без version.txt) ==========
 
 local function get_github_raw_url(file)
     local base = "https://raw.githubusercontent.com/" .. GITHUB_REPO .. "/" .. GITHUB_BRANCH .. "/"
@@ -548,7 +548,13 @@ local function github_request(url, callback)
     end)
 end
 
--- Загружает changelog.json и обновляет changelog_data
+-- Извлекает версию из содержимого Lua-файла
+local function extract_version_from_script(content)
+    local version_pattern = 'CURRENT_VERSION%s*=%s*"([^"]+)"'
+    return content:match(version_pattern)
+end
+
+-- Загружает changelog.json (опционально)
 local function fetch_changelog(callback)
     local url = get_github_raw_url("changelog.json")
     if not url then
@@ -569,26 +575,55 @@ local function fetch_changelog(callback)
     end)
 end
 
--- Проверяет версию и при необходимости загружает обновление
+-- Проверяет версию и при необходимости обновляется
 function check_for_updates(manual)
-    local version_url = get_github_raw_url("version.txt")
-    if not version_url then
+    local script_url = get_github_raw_url("absolute_checker.lua")
+    if not script_url then
         if manual then sampAddChatMessage("[AdminChecker] Ошибка: не удалось сформировать URL.", 0xFF0000) end
         return
     end
     if manual then sampAddChatMessage("[AdminChecker] Проверяю обновления...", 0xAAAAAA) end
-    github_request(version_url, function(content, code, err)
+    github_request(script_url, function(content, code, err)
         if code == 200 and content then
-            local remote_version = content:match("^%s*(%S+)%s*$")
+            local remote_version = extract_version_from_script(content)
             if remote_version and remote_version ~= CURRENT_VERSION then
                 sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
-                -- Загружаем changelog для отображения в настройках
+                -- Загружаем changelog для отображения
                 fetch_changelog()
-                -- Автоматически загружаем обновление
-                download_update()
+                -- Конвертируем в CP1251 и сохраняем
+                local ok, converted = pcall(function()
+                    return u8:decode(content)
+                end)
+                if not ok or not converted then
+                    sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки.", 0xFF0000)
+                    return
+                end
+                local temp_file = DATA_FOLDER .. "update_temp.lua"
+                local f = io.open(temp_file, "w")
+                if f then
+                    f:write(converted)
+                    f:close()
+                    local current_script = thisScript().path
+                    -- Удаляем текущий скрипт
+                    local removed, err_rem = os.remove(current_script)
+                    if not removed then
+                        sampAddChatMessage("[AdminChecker] Не удалось удалить текущий скрипт: " .. tostring(err_rem), 0xFF0000)
+                        return
+                    end
+                    local success, err_ren = os.rename(temp_file, current_script)
+                    if success then
+                        sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
+                        wait(1000)
+                        thisScript():reload()
+                    else
+                        sampAddChatMessage("[AdminChecker] Ошибка переименования файла: " .. tostring(err_ren), 0xFF0000)
+                    end
+                else
+                    sampAddChatMessage("[AdminChecker] Не удалось создать временный файл.", 0xFF0000)
+                end
             else
                 if manual then sampAddChatMessage("[AdminChecker] У вас актуальная версия.", 0x00FF00) end
-                -- Даже если версия не новая, обновим changelog
+                -- Обновляем changelog даже если версия не новая
                 fetch_changelog()
             end
         else
@@ -596,49 +631,6 @@ function check_for_updates(manual)
                 sampAddChatMessage(string.format("[AdminChecker] Не удалось проверить обновления. Код: %s", tostring(code)), 0xFF0000)
                 if err and err ~= "" then sampAddChatMessage("Ошибка: " .. err, 0xFF0000) end
             end
-        end
-    end)
-end
-
-function download_update()
-    local url = get_github_raw_url("absolute_checker.lua")
-    if not url then return end
-    sampAddChatMessage("[AdminChecker] Загружаю обновление...", 0xAAAAAA)
-    github_request(url, function(content, code, err)
-        if code == 200 and content then
-            -- Конвертируем из UTF-8 в CP1251
-            local ok, converted = pcall(function()
-                return u8:decode(content)
-            end)
-            if not ok or not converted then
-                sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки.", 0xFF0000)
-                return
-            end
-            local temp_file = DATA_FOLDER .. "update_temp.lua"
-            local f = io.open(temp_file, "w")
-            if f then
-                f:write(converted)
-                f:close()
-                local current_script = thisScript().path
-                -- Удаляем текущий скрипт
-                local removed, err_rem = os.remove(current_script)
-                if not removed then
-                    sampAddChatMessage("[AdminChecker] Не удалось удалить текущий скрипт: " .. tostring(err_rem), 0xFF0000)
-                    return
-                end
-                local success, err_ren = os.rename(temp_file, current_script)
-                if success then
-                    sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
-                    wait(1000)
-                    thisScript():reload()
-                else
-                    sampAddChatMessage("[AdminChecker] Ошибка переименования файла: " .. tostring(err_ren), 0xFF0000)
-                end
-            else
-                sampAddChatMessage("[AdminChecker] Не удалось создать временный файл.", 0xFF0000)
-            end
-        else
-            sampAddChatMessage("[AdminChecker] Ошибка загрузки скрипта. Код: " .. tostring(code), 0xFF0000)
         end
     end)
 end
