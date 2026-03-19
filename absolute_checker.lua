@@ -1372,14 +1372,7 @@ imgui.OnFrame(function() return show_changelog[0] end, function()
     imgui.SetNextWindowSize(imgui.ImVec2(500, 300), imgui.Cond.FirstUseEver)
     if imgui.Begin(u8("Новые возможности"), show_changelog, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar) then
         imgui.TextWrapped(u8("Список изменений в новых версиях:"))
-        imgui.Separator()
-        imgui.BeginChild("##new_changelog_scroll")
-        for _, entry in ipairs(new_changelog_entries) do
-            imgui.TextColored(imgui.ImVec4(0,1,1,1), u8(entry.version))
-            imgui.TextWrapped(u8(entry.changes or ""))
-            imgui.Separator()
-        end
-        imgui.EndChild()
+        imgui.SameLine(480 - imgui.CalcTextSize(u8("Закрыть")))
         if imgui.Button(u8("Закрыть")) then
             show_changelog[0] = false
             -- После закрытия окна обновляем сохранённый changelog
@@ -1390,6 +1383,14 @@ imgui.OnFrame(function() return show_changelog[0] end, function()
                 f:close()
             end
         end
+        imgui.Separator()
+        imgui.BeginChild("##new_changelog_scroll")
+        for _, entry in ipairs(new_changelog_entries) do
+            imgui.TextColored(imgui.ImVec4(0,1,1,1), u8(entry.version))
+            imgui.TextWrapped(u8(entry.changes or ""))
+            imgui.Separator()
+        end
+        imgui.EndChild()
         imgui.End()
     end
 end)
