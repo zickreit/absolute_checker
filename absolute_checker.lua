@@ -16,12 +16,14 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.6.2"
+local CURRENT_VERSION = "0.6.4"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
-    { version = "0.6.2", changes = "- Тест тест тест\n- Фикс 10........\n- Фикс 3........"},
-    { version = "0.6.1", changes = "- Фикс проблемы тест\n- Фикс 2............\n- Фикс 3........."},
+    { version = "0.6.4", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как...\nбла\nбла\nбла\nбла\nбла\nбла" }, 
+    { version = "0.6.3", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
+    { version = "0.6.2", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
+    { version = "0.6.1", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
     { version = "0.6.0", changes = "- Исправлено множество ошибок, связанных с обновлением активности админов, отображением диалогов, сбросом состояния при отключении.\n- Добавлено отслеживание активности админов через игровой чат.\n- Улучшена система автообновления: корректное сравнение версий, отображение списка изменений после обновления.\n- Прочие улучшения." },
     { version = "0.5.7", changes = "- Фикс проблемы с сбросом конфига при обновлении"},
     { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
@@ -1218,7 +1220,7 @@ end)
 imgui.OnFrame(function() return show_settings[0] end, function()
     local sw, sh = getScreenResolution()
     imgui.SetNextWindowPos(imgui.ImVec2(sw/2, sh/2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 1))
-    imgui.SetNextWindowSize(imgui.ImVec2(560, 0), imgui.Cond.Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(570, 0), imgui.Cond.Always)
     imgui.PushFont(font_settings_font)
     if imgui.Begin(u8("Настройки AdminChecker"), show_settings, imgui.WindowFlags.NoCollapse) then
         imgui.PushItemWidth(320)
@@ -1368,7 +1370,7 @@ imgui.OnFrame(function() return show_changelog[0] end, function()
     local sw, sh = getScreenResolution()
     imgui.SetNextWindowPos(imgui.ImVec2(sw/2, sh/2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
     imgui.SetNextWindowSize(imgui.ImVec2(500, 300), imgui.Cond.FirstUseEver)
-    if imgui.Begin(u8("Новые возможности"), show_changelog, imgui.WindowFlags.NoCollapse) then
+    if imgui.Begin(u8("Новые возможности"), show_changelog, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar) then
         imgui.TextWrapped(u8("Список изменений в новых версиях:"))
         imgui.Separator()
         imgui.BeginChild("##new_changelog_scroll")
