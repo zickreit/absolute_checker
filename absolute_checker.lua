@@ -20,8 +20,8 @@ local CURRENT_VERSION = "0.6.2"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
-    { version = "0.6.2", changes = "- Тест обновления\n- Бла бла бла бла...\nстрока\nстрока 2"},
-    { version = "0.6.1", changes = "- Тест 1\n- Бла бла бла...\nещё одна строка\nстрока 1000"},
+    { version = "0.6.2", changes = "- Тест тест тест\n- Фикс 10........\n- Фикс 3........"},
+    { version = "0.6.1", changes = "- Фикс проблемы тест\n- Фикс 2............\n- Фикс 3........."},
     { version = "0.6.0", changes = "- Исправлено множество ошибок, связанных с обновлением активности админов, отображением диалогов, сбросом состояния при отключении.\n- Добавлено отслеживание активности админов через игровой чат.\n- Улучшена система автообновления: корректное сравнение версий, отображение списка изменений после обновления.\n- Прочие улучшения." },
     { version = "0.5.7", changes = "- Фикс проблемы с сбросом конфига при обновлении"},
     { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
@@ -674,9 +674,11 @@ function check_for_updates(manual)
                 if version_greater(remote_version, CURRENT_VERSION) then
                     -- Есть новая версия
                     sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
+
                     -- Извлекаем changelog из нового скрипта
                     local new_changelog = extract_changelog_from_script(content)
-                    -- Сохраняем старый changelog для последующего сравнения
+
+                    -- Сохраняем старый changelog во временный файл для последующего сравнения
                     local old_changelog_file = DATA_FOLDER .. "changelog.json"
                     local old_changelog = {}
                     local f = io.open(old_changelog_file, "r")
@@ -685,7 +687,14 @@ function check_for_updates(manual)
                         f:close()
                         old_changelog = json.decode(data) or {}
                     end
-                    -- Конвертируем в CP1251 и сохраняем
+                    local temp_old_file = DATA_FOLDER .. "changelog_old.json"
+                    local tf = io.open(temp_old_file, "w")
+                    if tf then
+                        tf:write(json.encode(old_changelog, { indent = true }))
+                        tf:close()
+                    end
+
+                    -- Конвертируем новый скрипт в CP1251 и сохраняем
                     local ok, converted = pcall(function()
                         return u8:decode(content)
                     end)
@@ -708,7 +717,7 @@ function check_for_updates(manual)
                         local success, err_ren = os.rename(temp_file, current_script)
                         if success then
                             sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
-                            -- Сохраняем новый changelog для будущих сравнений (после перезагрузки он будет прочитан)
+                            -- Сохраняем новый changelog в основной файл (после перезагрузки он будет прочитан)
                             local new_f = io.open(old_changelog_file, "w")
                             if new_f then
                                 new_f:write(json.encode(new_changelog, { indent = true }))
@@ -738,8 +747,6 @@ function check_for_updates(manual)
         end
     end)
 end
-
-
 
 -- =============================================
 
@@ -797,8 +804,34 @@ function main()
         f:close()
         old_changelog = json.decode(data) or {}
     end
-    if next(old_changelog) then
-        -- Есть сохранённый changelog, ищем новые версии
+
+    -- Проверяем наличие временного старого changelog (после обновления)
+    local temp_old_file = DATA_FOLDER .. "changelog_old.json"
+    local temp_old = {}
+    local ft = io.open(temp_old_file, "r")
+    if ft then
+        local data = ft:read("*a")
+        ft:close()
+        temp_old = json.decode(data) or {}
+        os.remove(temp_old_file) -- удаляем временный файл после прочтения
+
+        -- Показываем окно с новыми версиями, сравнивая старый (temp_old) и текущий CHANGELOG
+        local new_versions = {}
+        local old_map = {}
+        for _, entry in ipairs(temp_old) do
+            old_map[entry.version] = entry.changes
+        end
+        for _, entry in ipairs(CHANGELOG) do
+            if not old_map[entry.version] then
+                table.insert(new_versions, entry)
+            end
+        end
+        if #new_versions > 0 then
+            new_changelog_entries = new_versions
+            show_changelog[0] = true
+        end
+    elseif next(old_changelog) then
+        -- Если нет временного файла, используем обычный сохранённый changelog (для первого запуска)
         local new_versions = {}
         local old_map = {}
         for _, entry in ipairs(old_changelog) do
@@ -814,8 +847,8 @@ function main()
             show_changelog[0] = true
         end
     end
-    -- В любом случае обновляем файл текущим changelog (после показа окна или сразу)
-    -- Мы обновим файл после того, как окно будет закрыто (или сразу, если не показывали)
+
+    -- Если окно не показано, сразу обновляем файл текущим CHANGELOG
     if not show_changelog[0] then
         local f = io.open(changelog_file, "w")
         if f then
