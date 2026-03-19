@@ -16,14 +16,10 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.6.4"
+local CURRENT_VERSION = "0.6.0"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
-    { version = "0.6.4", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как...\nбла\nбла\nбла\nбла\nбла\nбла" }, 
-    { version = "0.6.3", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
-    { version = "0.6.2", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
-    { version = "0.6.1", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
     { version = "0.6.0", changes = "- Исправлено множество ошибок, связанных с обновлением активности админов, отображением диалогов, сбросом состояния при отключении.\n- Добавлено отслеживание активности админов через игровой чат.\n- Улучшена система автообновления: корректное сравнение версий, отображение списка изменений после обновления.\n- Прочие улучшения." },
     { version = "0.5.7", changes = "- Фикс проблемы с сбросом конфига при обновлении"},
     { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
@@ -569,14 +565,14 @@ end
 -- Обработка сообщений в чате для обновления активности админов
 function samp_events.onServerMessage(color, text)
     if not current_server_key then return end
-    if not admins_db[current_server_key] and current_server_key ~= "Test" then return end
-    local decoded = u8:decode(text)
+    if not admins_db[current_server_key] or current_server_key == "Test" then return end
+    local decoded = text
     -- Ищем сообщения вида "Админ X: ..." или "Админ X[123]: ..."
     local nick_from_chat = decoded:match("^Админ%s+([^%[%s:]+)")
     if not nick_from_chat then return end
     local normalized = normalizeNick(nick_from_chat)
     -- Проверяем, есть ли такой админ в базе (для тестового сервера всегда true)
-    if current_server_key ~= "Test" and not admins_db[current_server_key][u8(normalized)] then
+    if current_server_key == "Test" or not admins_db[current_server_key][u8(normalized)] then
         return
     end
     -- Обновляем активность
@@ -783,12 +779,8 @@ function main()
     end
 
     -- Регистрация команд
-    sampRegisterChatCommand('showchange', function()
-        show_changelog[0] = not show_changelog[0]
-    end)
     sampRegisterChatCommand("checkupdate", function() check_for_updates(true) end)
     sampRegisterChatCommand("updadmins", function() update_all_bases() end)
-    sampRegisterChatCommand("reloadscript", function() thisScript():reload() end)
     sampRegisterChatCommand("admsettings", function()
         lua_thread.create(function()
             show_settings[0] = not show_settings[0]
