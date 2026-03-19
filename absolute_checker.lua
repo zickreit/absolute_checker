@@ -783,6 +783,9 @@ function main()
     end
 
     -- Регистрация команд
+    sampRegisterChatCommand('showchange', function()
+        show_changelog[0] = not show_changelog[0]
+    end)
     sampRegisterChatCommand("checkupdate", function() check_for_updates(true) end)
     sampRegisterChatCommand("updadmins", function() update_all_bases() end)
     sampRegisterChatCommand("reloadscript", function() thisScript():reload() end)
@@ -1372,7 +1375,7 @@ imgui.OnFrame(function() return show_changelog[0] end, function()
     imgui.SetNextWindowSize(imgui.ImVec2(500, 300), imgui.Cond.FirstUseEver)
     if imgui.Begin(u8("Новые возможности"), show_changelog, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar) then
         imgui.TextWrapped(u8("Список изменений в новых версиях:"))
-        imgui.SameLine(480 - imgui.CalcTextSize(u8("Закрыть")))
+        imgui.SameLine(430)
         if imgui.Button(u8("Закрыть")) then
             show_changelog[0] = false
             -- После закрытия окна обновляем сохранённый changelog
