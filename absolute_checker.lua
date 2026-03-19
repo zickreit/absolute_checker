@@ -16,10 +16,11 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 
 -- Версия скрипта
-local CURRENT_VERSION = "0.5.7"
+local CURRENT_VERSION = "0.6.0"
 
 -- Встроенный список изменений (changelog)
 local CHANGELOG = {
+    { version = "0.6.0", changes = "- Исправлено множество ошибок, связанных с обновлением активности админов, отображением диалогов, сбросом состояния при отключении.\n- Добавлено отслеживание активности админов через игровой чат.\n- Улучшена система автообновления: корректное сравнение версий, отображение списка изменений после обновления.\n- Прочие улучшения." },
     { version = "0.5.7", changes = "- Фикс проблемы с сбросом конфига при обновлении"},
     { version = "0.5.6", changes = "- Изменено стандартное расположение окна с админами"},
     { version = "0.5.5", changes = "- Добавлена команду /admsettings, для открытия меню\n- Исправлен баг с интерфейсами и разрешением игры, отличающимся от 1920x1080\n- Теперь отображаются события выпуска из читмира, вроде как..." }, 
@@ -118,7 +119,7 @@ local is_updating = false
 local last_admin_update = 0        -- время последнего обновления базы админов
 local last_chat_check = {}         -- для каждого сервера храним первую запись последней проверки
 local last_chat_check_time = 0     -- время последней проверки чата (сек)
-local dialog_delay = 0
+local dialog_delay = os.time() - 10 -- инициализируем, чтобы сразу не показывать задержку
 
 -- AFK статусы
 local afk_status = {}              -- [playerId] = { afk = boolean, minutes, seconds, total }
@@ -130,6 +131,8 @@ local last_activity = {}            -- [server_key][nick] = timestamp
 local show_window = imgui.new.bool(true)
 local show_settings = imgui.new.bool(false)
 local show_history = imgui.new.bool(false)
+local show_changelog = imgui.new.bool(false)  -- окно с новыми версиями
+local new_changelog_entries = {}               -- таблица для хранения новых версий
 local selected_admin = { nick = "", actions = {}, loading = false, last_loaded_nick = nil }
 local history_year = imgui.new.int(os.date("*t").year)
 local history_month = imgui.new.int(os.date("*t").month)
@@ -175,6 +178,16 @@ local function parse_timestamp(date_str)
         sec = tonumber(sec) 
     })
     return timestamp
+end
+
+-- Извлечение ника из строки действия (для сайта)
+local function parse_nick_from_action(action_text)
+    local decoded = u8:decode(action_text)
+    local nick = decoded:match("Админ%s+([^%[%s]+)") or decoded:match("Администратор%s+([^%[%s]+)") or decoded:match("Admin%s+([^%[%s]+)")
+    if nick then
+        return normalizeNick(nick)
+    end
+    return nil
 end
 
 -- Асинхронное выполнение POST-запроса к сайту
@@ -298,13 +311,11 @@ local function update_admins_database(server_key)
                     for _, entry in ipairs(actions) do
                         local ts = parse_timestamp(entry.date)
                         if ts >= cutoff then
-                            local decoded = u8:decode(entry.action)
-                            local nick = decoded:match("Админ%s+([^%[%s]+)") or decoded:match("Администратор%s+([^%[%s]+)") or decoded:match("Admin%s+([^%[%s]+)")
+                            local nick = parse_nick_from_action(entry.action)
                             if nick then
-                                local normalized = normalizeNick((nick))
-                                nicks[normalized] = true
-                                if not activity[normalized] or activity[normalized] < ts then
-                                    activity[normalized] = ts
+                                nicks[nick] = true
+                                if not activity[nick] or activity[nick] < ts then
+                                    activity[nick] = ts
                                 end
                             end
                         end
@@ -316,7 +327,7 @@ local function update_admins_database(server_key)
     end)
 end
 
--- Проверка новых записей (читмир и др.)
+-- Проверка новых записей (читмир и обновление активности)
 local function check_new_chat_alerts(server_key)
     if not settings.enable_chat_alerts then return end
     copas.addthread(function()
@@ -347,6 +358,16 @@ local function check_new_chat_alerts(server_key)
                             local low_act = u8:decode(act.action:lower())
                             if low_act:find("читмир") or low_act:find("читерский мир") or low_act:find("Читерский мир") or low_act:find("читерского мира") or low_act:find("Читерского мира") then
                                 sampAddChatMessage(u8:decode(act.date) .. ': ' .. u8:decode(act.action), 0xFFA500)
+                            end
+                            -- Обновляем активность админа из этого действия
+                            local nick = parse_nick_from_action(act.action)
+                            if nick then
+                                local ts = parse_timestamp(act.date)
+                                local act_table = last_activity[server_key] or {}
+                                if not act_table[nick] or act_table[nick] < ts then
+                                    act_table[nick] = ts
+                                end
+                                last_activity[server_key] = act_table
                             end
                         end
                     end
@@ -442,9 +463,15 @@ function samp_events.onShowDialog(dialogId, style, title, button1, button2, text
             return false
         end
     end
-    dialog_active = false
+    -- Не сбрасываем dialog_active здесь, оставляем true до закрытия диалога
     local new_title = ('ID: %d | %s'):format(dialogId, title)
     return {dialogId, style, new_title, button1, button2, text}
+end
+
+-- При отправке ответа на диалог сбрасываем флаг активности диалога
+function samp_events.onSendDialogResponse(dialogId, button, listboxId, input)
+    dialog_active = false
+    return {dialogId, button, listboxId, input}
 end
 
 local textdraws = {39, 47, 48, 43, 42, 49, 162, 2090}
@@ -466,7 +493,7 @@ function checkAfkForAdmins()
     auto_afk_check_active = true
     local success, result = pcall(function()
         for _, adm in ipairs(online_admins) do
-            if start_quest then
+            if sampGetGamestate() ~= 3 or start_quest then
                 return false
             end
             if sampIsDialogActive() or isTextdrawActive() or dialog_active then
@@ -476,6 +503,9 @@ function checkAfkForAdmins()
             big_ping = myPing > 100 and true or false
             local extraDelay = settings.ping_check and myPing or 0
             wait(extraDelay)
+            if sampGetGamestate() ~= 3 then
+                return false
+            end
             if sampIsDialogActive() or isTextdrawActive() or dialog_active then
                 return false
             end
@@ -510,6 +540,13 @@ function samp_events.onSendClientJoin(ver, mod, nick, response, authkey, clientv
         settings.last_admin_update_time = os.time()
         save_settings()
         last_chat_check[key] = nil
+        -- Сброс AFK-статусов и задержек при подключении
+        afk_status = {}
+        auto_afk_check_active = false
+        start_quest = false
+        dialog_active = false
+        last_afk_check = os.time()
+        dialog_delay = os.time() - 10
     end
 end
 
@@ -523,6 +560,28 @@ end
 function eshoRaz(id)
     wait(200 + sampGetPlayerPing(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))))
     sampSendClickPlayer(id, 0)
+end
+
+-- Обработка сообщений в чате для обновления активности админов
+function samp_events.onServerMessage(color, text)
+    if not current_server_key then return end
+    if not admins_db[current_server_key] and current_server_key ~= "Test" then return end
+    local decoded = u8:decode(text)
+    -- Ищем сообщения вида "Админ X: ..." или "Админ X[123]: ..."
+    local nick_from_chat = decoded:match("^Админ%s+([^%[%s:]+)")
+    if not nick_from_chat then return end
+    local normalized = normalizeNick(nick_from_chat)
+    -- Проверяем, есть ли такой админ в базе (для тестового сервера всегда true)
+    if current_server_key ~= "Test" and not admins_db[current_server_key][u8(normalized)] then
+        return
+    end
+    -- Обновляем активность
+    local act = last_activity[current_server_key] or {}
+    local now = os.time()
+    if not act[normalized] or act[normalized] < now then
+        act[normalized] = now
+    end
+    last_activity[current_server_key] = act
 end
 
 -- ========== СИСТЕМА АВТООБНОВЛЕНИЯ (без внешних файлов) ==========
@@ -562,6 +621,42 @@ local function extract_version_from_script(content)
     return content:match(version_pattern)
 end
 
+-- Извлекает таблицу CHANGELOG из содержимого скрипта
+local function extract_changelog_from_script(content)
+    local changelog_pattern = 'CHANGELOG%s*=%s*(%b[])'
+    local changelog_str = content:match(changelog_pattern)
+    if not changelog_str then return {} end
+    -- Преобразуем строку в таблицу через load (осторожно, но безопасно, так как код из доверенного источника)
+    local f, err = load("return " .. changelog_str)
+    if f then
+        local ok, res = pcall(f)
+        if ok and type(res) == "table" then
+            return res
+        end
+    end
+    return {}
+end
+
+-- Сравнение версий (возвращает true если v1 > v2)
+local function version_greater(v1, v2)
+    local function split(v)
+        local parts = {}
+        for num in v:gmatch("%d+") do
+            table.insert(parts, tonumber(num))
+        end
+        return parts
+    end
+    local p1 = split(v1)
+    local p2 = split(v2)
+    for i = 1, math.max(#p1, #p2) do
+        local n1 = p1[i] or 0
+        local n2 = p2[i] or 0
+        if n1 > n2 then return true end
+        if n1 < n2 then return false end
+    end
+    return false
+end
+
 -- Проверяет версию и при необходимости обновляется
 function check_for_updates(manual)
     local script_url = get_github_raw_url("absolute_checker.lua")
@@ -573,43 +668,65 @@ function check_for_updates(manual)
     github_request(script_url, function(content, code, err)
         if code == 200 and content then
             local remote_version = extract_version_from_script(content)
-            if remote_version and remote_version ~= CURRENT_VERSION then
-                sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
-                -- Конвертируем в CP1251 и сохраняем
-                local ok, converted = pcall(function()
-                    return u8:decode(content)
-                end)
-                if not ok or not converted then
-                    sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки.", 0xFF0000)
-                    return
-                end
-                local temp_file = DATA_FOLDER .. "update_temp.lua"
-                local f = io.open(temp_file, "w")
-                if f then
-                    f:write(converted)
-                    f:close()
-                    local current_script = thisScript().path
-                    -- Удаляем текущий скрипт
-                    local removed, err_rem = os.remove(current_script)
-                    if not removed then
-                        sampAddChatMessage("[AdminChecker] Не удалось удалить текущий скрипт: " .. tostring(err_rem), 0xFF0000)
+            if remote_version then
+                if version_greater(remote_version, CURRENT_VERSION) then
+                    -- Есть новая версия
+                    sampAddChatMessage(string.format("[AdminChecker] Найдена новая версия: %s (текущая %s)", remote_version, CURRENT_VERSION), 0x00FF00)
+                    -- Извлекаем changelog из нового скрипта
+                    local new_changelog = extract_changelog_from_script(content)
+                    -- Сохраняем старый changelog для последующего сравнения
+                    local old_changelog_file = DATA_FOLDER .. "changelog.json"
+                    local old_changelog = {}
+                    local f = io.open(old_changelog_file, "r")
+                    if f then
+                        local data = f:read("*a")
+                        f:close()
+                        old_changelog = json.decode(data) or {}
+                    end
+                    -- Конвертируем в CP1251 и сохраняем
+                    local ok, converted = pcall(function()
+                        return u8:decode(content)
+                    end)
+                    if not ok or not converted then
+                        sampAddChatMessage("[AdminChecker] Ошибка преобразования кодировки.", 0xFF0000)
                         return
                     end
-                    local success, err_ren = os.rename(temp_file, current_script)
-                    if success then
-                        sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
-                        settings = default_settings
-                        save_settings()
-                        wait(1000)
-                        thisScript():reload()
+                    local temp_file = DATA_FOLDER .. "update_temp.lua"
+                    local f = io.open(temp_file, "w")
+                    if f then
+                        f:write(converted)
+                        f:close()
+                        local current_script = thisScript().path
+                        -- Удаляем текущий скрипт
+                        local removed, err_rem = os.remove(current_script)
+                        if not removed then
+                            sampAddChatMessage("[AdminChecker] Не удалось удалить текущий скрипт: " .. tostring(err_rem), 0xFF0000)
+                            return
+                        end
+                        local success, err_ren = os.rename(temp_file, current_script)
+                        if success then
+                            sampAddChatMessage("[AdminChecker] Обновление загружено. Перезагружаю скрипт...", 0x00FF00)
+                            -- Сохраняем новый changelog для будущих сравнений (после перезагрузки он будет прочитан)
+                            local new_f = io.open(old_changelog_file, "w")
+                            if new_f then
+                                new_f:write(json.encode(new_changelog, { indent = true }))
+                                new_f:close()
+                            end
+                            wait(1000)
+                            thisScript():reload()
+                        else
+                            sampAddChatMessage("[AdminChecker] Ошибка переименования файла: " .. tostring(err_ren), 0xFF0000)
+                        end
                     else
-                        sampAddChatMessage("[AdminChecker] Ошибка переименования файла: " .. tostring(err_ren), 0xFF0000)
+                        sampAddChatMessage("[AdminChecker] Не удалось создать временный файл.", 0xFF0000)
                     end
+                elseif remote_version == CURRENT_VERSION then
+                    if manual then sampAddChatMessage("[AdminChecker] У вас актуальная версия.", 0x00FF00) end
                 else
-                    sampAddChatMessage("[AdminChecker] Не удалось создать временный файл.", 0xFF0000)
+                    if manual then sampAddChatMessage("[AdminChecker] У вас неизвестная версия (новее, чем на GitHub).", 0xFFA500) end
                 end
             else
-                if manual then sampAddChatMessage("[AdminChecker] У вас актуальная версия.", 0x00FF00) end
+                if manual then sampAddChatMessage("[AdminChecker] Не удалось определить версию на GitHub.", 0xFF0000) end
             end
         else
             if manual then
@@ -620,10 +737,7 @@ function check_for_updates(manual)
     end)
 end
 
--- Регистрация команд
-sampRegisterChatCommand("checkupdate", function()
-    check_for_updates(true)
-end)
+
 
 -- =============================================
 
@@ -657,6 +771,8 @@ function main()
         current_server_key = detectServer(ip, port)
     end
 
+    -- Регистрация команд
+    sampRegisterChatCommand("checkupdate", function() check_for_updates(true) end)
     sampRegisterChatCommand("updadmins", function() update_all_bases() end)
     sampRegisterChatCommand("reloadscript", function() thisScript():reload() end)
     sampRegisterChatCommand("admsettings", function()
@@ -670,8 +786,56 @@ function main()
         check_for_updates(true)
     end)
 
+    -- Загрузка сохранённого changelog и сравнение с текущим
+    local changelog_file = DATA_FOLDER .. "changelog.json"
+    local old_changelog = {}
+    local f = io.open(changelog_file, "r")
+    if f then
+        local data = f:read("*a")
+        f:close()
+        old_changelog = json.decode(data) or {}
+    end
+    if next(old_changelog) then
+        -- Есть сохранённый changelog, ищем новые версии
+        local new_versions = {}
+        local old_map = {}
+        for _, entry in ipairs(old_changelog) do
+            old_map[entry.version] = entry.changes
+        end
+        for _, entry in ipairs(CHANGELOG) do
+            if not old_map[entry.version] then
+                table.insert(new_versions, entry)
+            end
+        end
+        if #new_versions > 0 then
+            new_changelog_entries = new_versions
+            show_changelog[0] = true
+        end
+    end
+    -- В любом случае обновляем файл текущим changelog (после показа окна или сразу)
+    -- Мы обновим файл после того, как окно будет закрыто (или сразу, если не показывали)
+    if not show_changelog[0] then
+        local f = io.open(changelog_file, "w")
+        if f then
+            f:write(json.encode(CHANGELOG, { indent = true }))
+            f:close()
+        end
+    end
+
     while true do
         copas.step(0)
+
+        -- Сброс состояния при отключении от сервера
+        if sampGetGamestate() ~= 3 then
+            current_server_key = nil
+            online_admins = {}
+            afk_status = {}
+            auto_afk_check_active = false
+            start_quest = false
+            dialog_active = false
+            last_afk_check = os.time()
+            dialog_delay = os.time() - 10
+        end
 
         -- Обновление онлайн-админов (с фильтром по view_mode)
         if sampGetGamestate() == 3 and current_server_key and admins_db[current_server_key] then
@@ -754,17 +918,13 @@ function main()
             start_quest = false
             dialog_active = false
             last_afk_check = os.time()
-        end
-
-        -- Сброс dialog_active
-        if not sampIsDialogActive() and not auto_afk_check_active then
-            dialog_active = false
+            dialog_delay = os.time() - 10
         end
 
         -- AFK проверка по таймеру
         if current_server_key and sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) > 0 then
             if settings.afk_check_interval > 0 and os.time() - last_afk_check >= settings.afk_check_interval then
-                if not start_quest and not dialog_active and not auto_afk_check_active then
+                if not start_quest and not auto_afk_check_active then
                     if not sampIsDialogActive() and not isTextdrawActive() and os.time() - dialog_delay >= 5 then
                         lua_thread.create(function()
                             if checkAfkForAdmins() then
@@ -937,17 +1097,19 @@ imgui.OnFrame(function() return show_window[0] end, function(this)
             imgui.Separator()
             imgui.TextColored(imgui.ImVec4(0,1,0,1), u8("Не мешаем начальному квесту..."))
         end
-        if os.time() - dialog_delay <= 5 or sampIsDialogActive() then
-            imgui.Separator()
-            if os.time() - dialog_delay == 0 or os.time() - dialog_delay == 1 then
+        -- Отображение состояния диалогов
+        if sampGetGamestate() == 3 then
+            if sampIsDialogActive() or isTextdrawActive() then
+                imgui.Separator()
                 imgui.TextColored(imgui.ImVec4(1,0.3,0.3,0.6), u8("Открыт диалог. АФК не проверяется"))
-            else
-                imgui.TextColored(imgui.ImVec4(1,0.3,0.3,0.6), u8("Задержка после диалогов: ") .. (os.time() - dialog_delay) - 1 .. u8(" с"))
+            elseif os.time() - dialog_delay <= 5 then
+                imgui.Separator()
+                imgui.TextColored(imgui.ImVec4(1,0.3,0.3,0.6), u8("Задержка после диалогов: ") .. (os.time() - dialog_delay) .. u8(" с"))
             end
-        end
-        if os.time() - last_afk_check >= 10 then
-            imgui.Separator()
-            imgui.TextColored(imgui.ImVec4(1,0,0,0.8), u8("Последнее обновление АФК: ") .. os.time() - last_afk_check .. u8(" с"))
+            if os.time() - last_afk_check >= 10 then
+                imgui.Separator()
+                imgui.TextColored(imgui.ImVec4(1,0,0,0.8), u8("Последнее обновление АФК: ") .. os.time() - last_afk_check .. u8(" с"))
+            end
         end
         if big_ping then
             imgui.Separator()
@@ -1107,6 +1269,8 @@ imgui.OnFrame(function() return show_settings[0] end, function()
                 settings.chat_alerts_interval = val_chat_interval[0]
                 changed = true
             end
+            imgui.SameLine()
+            imgui.TextQuestion("Чем меньше значение - тем быстрее будут выводится в чат новые попадания в читмир, также обновляется активность админов.")
             local val_days = imgui.new.int(settings.days_to_keep_admins)
             if imgui.SliderInt(u8("Порог бездействия админов (дни)"), val_days, 1, 60) then
                 settings.days_to_keep_admins = val_days[0]
@@ -1120,7 +1284,7 @@ imgui.OnFrame(function() return show_settings[0] end, function()
                 changed = true
             end
             local val_chat_alerts = imgui.new.bool(settings.enable_chat_alerts)
-            if imgui.Checkbox(u8("Выводить читмир-сообщения в чат"), val_chat_alerts) then
+            if imgui.Checkbox(u8("Выводить читмир-сообщения в чат и обновлять активность админов"), val_chat_alerts) then
                 settings.enable_chat_alerts = val_chat_alerts[0]
                 changed = true
             end
@@ -1162,6 +1326,35 @@ imgui.OnFrame(function() return show_settings[0] end, function()
         imgui.End()
     end
     imgui.PopFont()
+end)
+
+-- Окно с новыми версиями после обновления
+imgui.OnFrame(function() return show_changelog[0] end, function()
+    local sw, sh = getScreenResolution()
+    imgui.SetNextWindowPos(imgui.ImVec2(sw/2, sh/2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
+    imgui.SetNextWindowSize(imgui.ImVec2(500, 300), imgui.Cond.FirstUseEver)
+    if imgui.Begin(u8("Новые возможности"), show_changelog, imgui.WindowFlags.NoCollapse) then
+        imgui.TextWrapped(u8("Список изменений в новых версиях:"))
+        imgui.Separator()
+        imgui.BeginChild("##new_changelog_scroll")
+        for _, entry in ipairs(new_changelog_entries) do
+            imgui.TextColored(imgui.ImVec4(0,1,1,1), u8(entry.version))
+            imgui.TextWrapped(u8(entry.changes or ""))
+            imgui.Separator()
+        end
+        imgui.EndChild()
+        if imgui.Button(u8("Закрыть")) then
+            show_changelog[0] = false
+            -- После закрытия окна обновляем сохранённый changelog
+            local changelog_file = DATA_FOLDER .. "changelog.json"
+            local f = io.open(changelog_file, "w")
+            if f then
+                f:write(json.encode(CHANGELOG, { indent = true }))
+                f:close()
+            end
+        end
+        imgui.End()
+    end
 end)
 
 function imgui.TextQuestion(text)
